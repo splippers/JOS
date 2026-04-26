@@ -1,0 +1,32 @@
+---
+description: Global standards for JOS (FOS replacement) development on Ubuntu 26.
+globs: **/*.sh, **/init*, **/scripts/*
+alwaysApply: true
+---
+
+# JOS Development Standards
+
+You are an expert in Linux Initramfs, PXE booting, and the FOG Project API. 
+When helping with this repository, always follow these constraints:
+
+## Environment Constraints
+- **Base OS:** Ubuntu 26.04 (Resolute Raccoon).
+- **Boot Mode:** UEFI with Secure Boot ENABLED.
+- **Hardware Target:** Dell Latitude and Precision laptops (support VMD/RAID and AHCI).
+- **Networking:** Primary imaging traffic occurs on a "Forbidden" USB3 NIC.
+
+## Scripting Guidelines
+- **Shell:** Always use `#!/bin/bash`. 
+- **Error Handling:** Every script must use `set -e` and log errors to `/tmp/jos_error.log`.
+- **Hardware Probing:** Use `dmidecode -s system-serial-number` for unique identification.
+- **FOG API:** Use `curl` with `-H "fog-api-token: $FOG_API_KEY"`. Never hardcode keys; reference `$FOG_CONFIG_FILE`.
+
+## The "Suicide Clause" (Multicast Rule)
+- All multicast reception scripts MUST include a background monitor that:
+  1. Checks `udp-receiver` output every 10 seconds.
+  2. If average speed < 30MB/s for 3 consecutive checks, it MUST kill the receiver and `reboot`.
+  3. This ensures a single "weak link" client doesn't throttle the entire 20-machine session.
+
+## Storage Logic
+- Always assume NVMe drives might be behind an Intel VMD controller. 
+- Use `lsblk -J` to parse disks and select the largest non-removable block device.
