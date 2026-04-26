@@ -1,0 +1,23 @@
+#!/bin/sh
+# JOS init script (skeleton)
+# This will orchestrate networking, registration, inventory, and task handling.
+
+echo "JOS: Booting minimal PXE environment..."
+
+# Bring up networking
+/scripts/jos-net.sh
+
+# Get serial number
+SERIAL=$(/scripts/jos-serial.sh)
+echo "JOS: Serial detected: $SERIAL"
+
+# Register with FOG
+/scripts/jos-register.sh "$SERIAL"
+
+# Upload inventory
+/scripts/jos-inventory.sh "$SERIAL"
+
+# Wait for task (deploy, multicast, etc.)
+/scripts/jos-multicast.sh "$SERIAL"
+
+exec /bin/sh
