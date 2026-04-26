@@ -1,10 +1,28 @@
 #!/bin/sh
-# Placeholder for multicast queue logic
+# JOS multicast queue placeholder
+# Runs inside BusyBox initramfs
 
 SERIAL="$1"
 
-echo "JOS: Waiting for multicast task for $SERIAL..."
+log() {
+    echo "JOS-MULTICAST: $1"
+}
 
-sleep 5
+if [ -z "$SERIAL" ]; then
+    log "ERROR: No serial passed to multicast script."
+    exit 1
+fi
 
-echo "JOS: No multicast logic implemented yet."
+log "Waiting for multicast task for serial: $SERIAL"
+
+# Placeholder loop — will later poll FOG API
+# using /tools/curl once registration logic is implemented
+i=0
+while [ $i -lt 5 ]; do
+    log "Polling for multicast assignment... ($i)"
+    sleep 1
+    i=$((i + 1))
+done
+
+log "No multicast logic implemented yet."
+exit 0
