@@ -1,4 +1,4 @@
-# JOS - An Ubuntu-Powered Secure Boot Compatible Imaging Solution
+# JOS - Jonathan's Operating System - An Ubuntu-Powered Secure Boot Compatible Imaging Solution
 
 ## Overview
 
