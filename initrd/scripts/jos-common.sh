@@ -82,7 +82,9 @@ jos_curl_json() {
   if [[ -n "$data" ]]; then
     headers+=("--header=Content-Type: application/json")
     # BusyBox wget uses --post-data for POST; for PUT/DELETE we still try --method if present.
-    if "$wget_bin" --help 2>&1 | grep -q -- '--method'; then
+    # BusyBox wget versions differ; prefer --method/--body-data if available,
+    # else fall back to POST-only --post-data.
+    if "$wget_bin" --help 2>&1 | grep -q -- '--method' && "$wget_bin" --help 2>&1 | grep -q -- '--body-data'; then
       "$wget_bin" -qO "$tmp_body" -S --server-response \
         --method="$method" \
         "${headers[@]}" \

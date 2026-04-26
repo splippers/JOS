@@ -43,6 +43,14 @@ extract_speed_mb_s() {
   echo "${s:-0}"
 }
 
+# If the receiver exits quickly (arg error, missing perms, etc.), do not hang.
+sleep 1
+if ! kill -0 "$UDP_PID" 2>/dev/null; then
+  err "UDPCast: udp-receiver exited immediately; last output:"
+  tail -n 50 "$LOG_FILE" 2>/dev/null || true
+  exit 1
+fi
+
 while kill -0 "$UDP_PID" 2>/dev/null; do
   sleep 10
 
