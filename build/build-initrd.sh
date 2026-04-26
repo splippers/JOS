@@ -1,7 +1,10 @@
 #!/bin/bash
 # Build JOS initramfs
+
 bash build/fetch-busybox.sh
 bash build/fetch-curl.sh
+bash build/fetch-dmidecode.sh
+
 set -e
 
 echo "Building JOS initramfs..."
