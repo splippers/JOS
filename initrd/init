@@ -1,23 +1,81 @@
 #!/bin/sh
-# JOS init script (skeleton)
-# This will orchestrate networking, registration, inventory, and task handling.
+# JOS init script — orchestrates networking, registration, inventory, and task handling
+# Runs inside BusyBox initramfs
 
-echo "JOS: Booting minimal PXE environment..."
+# -----------------------------
+# Basic environment setup
+# -----------------------------
+export PATH=/bin:/sbin:/tools:/scripts
+export HOME=/
 
-# Bring up networking
+log() {
+    echo "JOS-INIT: $1"
+}
+
+log "Booting JOS minimal PXE environment..."
+
+# -----------------------------
+# Mount essential filesystems
+# -----------------------------
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+# -----------------------------
+# Networking
+# -----------------------------
+log "Bringing up networking..."
 /scripts/jos-net.sh
+if [ $? -ne 0 ]; then
+    log "ERROR: Networking failed. Dropping to emergency shell."
+    exec /bin/sh
+fi
 
-# Get serial number
+# -----------------------------
+# Serial number detection
+# -----------------------------
+if [ ! -x /scripts/jos-serial.sh ]; then
+    log "ERROR: jos-serial.sh missing!"
+    exec /bin/sh
+fi
+
 SERIAL=$(/scripts/jos-serial.sh)
-echo "JOS: Serial detected: $SERIAL"
 
-# Register with FOG
+if [ -z "$SERIAL" ]; then
+    log "ERROR: Could not determine serial number."
+    exec /bin/sh
+fi
+
+log "Serial detected: $SERIAL"
+
+# -----------------------------
+# FOG registration
+# -----------------------------
+log "Registering host with FOG..."
 /scripts/jos-register.sh "$SERIAL"
+if [ $? -ne 0 ]; then
+    log "ERROR: Registration failed. Dropping to shell."
+    exec /bin/sh
+fi
 
-# Upload inventory
+# -----------------------------
+# Hardware inventory
+# -----------------------------
+log "Collecting hardware inventory..."
 /scripts/jos-inventory.sh "$SERIAL"
+if [ $? -ne 0 ]; then
+    log "ERROR: Inventory upload failed. Dropping to shell."
+    exec /bin/sh
+fi
 
-# Wait for task (deploy, multicast, etc.)
+# -----------------------------
+# Task handling (multicast, deploy, etc.)
+# -----------------------------
+log "Waiting for FOG task assignment..."
 /scripts/jos-multicast.sh "$SERIAL"
 
+# -----------------------------
+# If we reach here, drop to shell
+# -----------------------------
+log "No further tasks. Dropping to shell."
 exec /bin/sh
