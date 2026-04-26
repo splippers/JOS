@@ -38,5 +38,3 @@ build/out/
 /udp-receiver
 /udp-sender
 
-# Nested clone of the JOG repo (separate git history); commit JOG from JOG/
-JOG/
