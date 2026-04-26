@@ -4,6 +4,7 @@ initrd/sbin/
 initrd/lib/
 initrd/lib64/
 initrd/usr/
+initrd/tools
 
 # Build artifacts
 build/out/
