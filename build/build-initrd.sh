@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build JOS initramfs
-
+bash build/fetch-busybox.sh
 set -e
 
 echo "Building JOS initramfs..."
