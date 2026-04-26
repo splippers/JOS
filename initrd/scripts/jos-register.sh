@@ -1,38 +1,42 @@
-#!/bin/sh
+#!/bin/bash
+set -e
+exec 2>>/tmp/jos_error.log
 # Register host with FOG using the FOG REST API
 
 SERIAL="$1"
 
-log() {
-    echo "JOS-REGISTER: $1"
-}
+. /scripts/jos-common.sh
 
-if [ -z "$SERIAL" ]; then
-    log "ERROR: No serial provided."
-    exit 1
+[[ -n "$SERIAL" ]] || die "REGISTER: No serial provided."
+
+jos_load_fog_config
+
+log "REGISTER: Registering/updating host $SERIAL with FOG..."
+
+# Base API endpoints
+FOG_BASE="http://${FOG_SERVER}/fog"
+HOST_EP="${FOG_BASE}/host"
+
+# Determine a primary MAC address from the active interface (fallback: first non-lo).
+ACTIVE_IFACE="$(cat /tmp/jos-active-iface 2>/dev/null || true)"
+if [[ -z "$ACTIVE_IFACE" ]]; then
+  ACTIVE_IFACE="$(ls /sys/class/net | grep -v '^lo$' | head -n1 || true)"
 fi
 
-log "Registering host $SERIAL with FOG..."
+MAC_RAW="$(cat "/sys/class/net/${ACTIVE_IFACE}/address" 2>/dev/null || true)"
+MAC="${MAC_RAW^^}"
+[[ -n "$MAC" ]] || die "REGISTER: Unable to determine MAC address (iface: ${ACTIVE_IFACE:-unknown})"
 
-# Static curl path
-CURL="/tools/curl"
+# Check if host already exists (FOG host endpoint is by host ID typically; serial lookup varies by version).
+# We'll attempt GET /host/<serial> first; if that fails, we will just create and rely on FOG to de-dupe on MAC.
+EXISTING=""
+if EXISTING="$(jos_curl_json GET "${HOST_EP}/${SERIAL}" 2>/dev/null || true)"; then
+  true
+fi
 
-# Replace these with your real tokens
-FOG_SERVER="<fog-server-ip>"
-FOG_API="http://${FOG_SERVER}/fog/host"
-FOG_API_TOKEN="<fog-api-token>"
-FOG_USER_TOKEN="<fog-user-token>"
-
-# Check if host already exists
-EXISTING=$($CURL -s \
-    -H "fog-api-token: ${FOG_API_TOKEN}" \
-    -H "fog-user-token: ${FOG_USER_TOKEN}" \
-    "${FOG_API}/${SERIAL}")
-
-echo "$EXISTING" | grep -q "\"id\":"
-if [ $? -eq 0 ]; then
-    log "Host already exists in FOG. Skipping creation."
-    exit 0
+if echo "$EXISTING" | grep -q '"id"[[:space:]]*:'; then
+  log "REGISTER: Host already exists in FOG. Skipping creation."
+  exit 0
 fi
 
 # Build JSON payload
@@ -40,26 +44,17 @@ JSON_PAYLOAD=$(cat <<EOF
 {
   "name": "${SERIAL}",
   "description": "Auto-registered by JOS",
-  "serial": "${SERIAL}"
+  "serial": "${SERIAL}",
+  "macs": ["${MAC}"]
 }
 EOF
 )
 
 # Create host
-RESULT=$($CURL -s -X POST \
-    -H "Content-Type: application/json" \
-    -H "fog-api-token: ${FOG_API_TOKEN}" \
-    -H "fog-user-token: ${FOG_USER_TOKEN}" \
-    -d "${JSON_PAYLOAD}" \
-    "${FOG_API}")
+RESULT="$(jos_curl_json POST "${HOST_EP}" "${JSON_PAYLOAD}" || true)"
 
-echo "$RESULT" | grep -q "\"id\":"
-if [ $? -eq 0 ]; then
-    log "Host successfully registered."
-else
-    log "ERROR: Host registration failed."
-    log "FOG response: $RESULT"
-    exit 1
-fi
+echo "$RESULT" | grep -q '"id"[[:space:]]*:' || die "REGISTER: Host registration failed. FOG response: ${RESULT}"
+
+log "REGISTER: Host successfully registered."
 
 exit 0

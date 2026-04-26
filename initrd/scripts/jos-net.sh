@@ -1,18 +1,18 @@
-#!/bin/sh
+#!/bin/bash
+set -e
+exec 2>>/tmp/jos_error.log
 # Bring up networking in the JOS initramfs using BusyBox udhcpc
 
-log() {
-    echo "JOS-NET: $1"
-}
+. /scripts/jos-common.sh
 
-log "Initialising network..."
+log "NET: Initialising network..."
 
 # Wait for NICs to appear (important for USB-C docks, laptops, etc.)
-for i in 1 2 3 4 5; do
-    IFACES=$(ls /sys/class/net 2>/dev/null)
-    [ -n "$IFACES" ] && break
-    log "Waiting for network interfaces..."
-    sleep 1
+for _ in 1 2 3 4 5; do
+  IFACES="$(ls /sys/class/net 2>/dev/null || true)"
+  [[ -n "$IFACES" ]] && break
+  log "NET: Waiting for network interfaces..."
+  sleep 1
 done
 
 # Try DHCP on all real interfaces
@@ -22,24 +22,22 @@ for iface in $IFACES; do
         lo|docker*|veth*|virbr*|br*|tap*) continue ;;
     esac
 
-    log "Attempting DHCP on $iface"
+    log "NET: Attempting DHCP on $iface"
 
     # BusyBox udhcpc flags:
     # -i iface   → interface
     # -q         → quit after obtaining lease
     # -t 5       → try 5 times
     # -n         → exit if no lease
-    # -s script  → udhcpc event handler (we use BusyBox default)
-    udhcpc -i "$iface" -q -t 5 -n
-
-    if [ $? -eq 0 ]; then
-        log "DHCP successful on $iface"
-        echo "$iface" > /tmp/jos-active-iface
-        exit 0
-    else
-        log "DHCP failed on $iface"
+    # -s script  → udhcpc event handler (captures NEXT SERVER / siaddr)
+    if udhcpc -i "$iface" -q -t 5 -n -s /scripts/udhcpc-jos.sh; then
+      log "NET: DHCP successful on $iface"
+      # /scripts/udhcpc-jos.sh already writes /tmp/jos-active-iface and /tmp/jos-next-server
+      exit 0
     fi
+
+    log "NET: DHCP failed on $iface"
 done
 
-log "ERROR: No network interfaces received a DHCP lease."
+err "NET: No network interfaces received a DHCP lease."
 exit 1

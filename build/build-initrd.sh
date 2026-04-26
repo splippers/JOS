@@ -1,13 +1,14 @@
 #!/bin/bash
 # Build JOS initramfs
 
+set -e
+
 bash build/fetch-busybox.sh
 bash build/fetch-curl.sh
-bash build/fetch-dmidecode.sh
-bash build/fetch-lshw.sh
-bash build/fetch-hwinfo.sh
-
-set -e
+# udpcast tools (udp-receiver/udp-sender) for multicast imaging
+bash build/fetch-udpcast.sh
+# dmidecode/lshw/hwinfo static assets are not reliably available upstream.
+# JOS scripts primarily use sysfs/procfs to keep the initrd small and robust.
 
 echo "Building JOS initramfs..."
 

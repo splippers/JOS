@@ -1,66 +1,56 @@
-#!/bin/sh
+#!/bin/bash
+set -e
+exec 2>>/tmp/jos_error.log
 # Collect hardware inventory and upload to FOG
 
 SERIAL="$1"
 
-log() {
-    echo "JOS-INVENTORY: $1"
-}
+. /scripts/jos-common.sh
 
-if [ -z "$SERIAL" ]; then
-    log "ERROR: No serial provided."
-    exit 1
-fi
+[[ -n "$SERIAL" ]] || die "INVENTORY: No serial provided."
+jos_load_fog_config
 
-log "Collecting hardware inventory for $SERIAL..."
+log "INVENTORY: Collecting hardware inventory for $SERIAL..."
 
-# Paths to static tools
-DMIDECODE="/tools/dmidecode"
-LSHW="/tools/lshw"
-HWINFO="/tools/hwinfo"
-CURL="/tools/curl"
+ACTIVE_IFACE="$(cat /tmp/jos-active-iface 2>/dev/null || true)"
 
-# Collect CPU info (dmidecode is reliable in initramfs)
-CPU="$($DMIDECODE -t processor | grep 'Version:' | head -n1 | cut -d: -f2 | sed 's/^ *//')"
+# Keep inventory lightweight: use proc/sysfs only (no external binaries required).
+CPU="$(grep -m1 -E '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//' || true)"
 
 # Collect RAM (from /proc)
-RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+RAM_KB="$(grep MemTotal /proc/meminfo | awk '{print $2}' || true)"
 
-# Collect disk info (BusyBox lsblk is limited, so use hwinfo)
-DISK_INFO="$($HWINFO --disk --short | sed 's/"/\\"/g')"
+# Collect a small amount of disk info from /sys/block
+DISK_INFO="$(ls /sys/block 2>/dev/null | tr '\n' ' ' | sed 's/"/\\"/g' || true)"
 
-# Collect full DMI table (escaped for JSON)
-DMI_INFO="$($DMIDECODE | sed 's/"/\\"/g')"
-
-# Collect full hardware tree (escaped)
-LSHW_INFO="$($LSHW -json 2>/dev/null | sed 's/"/\\"/g')"
+# DMI basics from sysfs (Dell Service Tag comes from product_serial already)
+DMI_VENDOR="$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null | sed 's/"/\\"/g' || true)"
+DMI_PRODUCT="$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null | sed 's/"/\\"/g' || true)"
+DMI_VERSION="$(cat /sys/devices/virtual/dmi/id/product_version 2>/dev/null | sed 's/"/\\"/g' || true)"
+DMI_BIOS_VER="$(cat /sys/devices/virtual/dmi/id/bios_version 2>/dev/null | sed 's/"/\\"/g' || true)"
 
 # Build JSON payload
 JSON_PAYLOAD=$(cat <<EOF
 {
   "serial": "$SERIAL",
+  "active_iface": "${ACTIVE_IFACE}",
   "cpu": "$CPU",
   "ram_kb": "$RAM_KB",
   "disk": "$DISK_INFO",
-  "dmi": "$DMI_INFO",
-  "lshw": "$LSHW_INFO"
+  "dmi_vendor": "$DMI_VENDOR",
+  "dmi_product": "$DMI_PRODUCT",
+  "dmi_version": "$DMI_VERSION",
+  "bios_version": "$DMI_BIOS_VER"
 }
 EOF
 )
 
-# FOG API endpoint (you will replace <fog-server-ip>)
-FOG_API="http://<fog-server-ip>/fog/host/${SERIAL}"
+FOG_API="http://${FOG_SERVER}/fog/host/${SERIAL}"
 
-log "Uploading inventory to FOG..."
+log "INVENTORY: Uploading inventory to FOG..."
 
-$CURL -s -X PUT "$FOG_API" \
-    -H "Content-Type: application/json" \
-    -d "$JSON_PAYLOAD"
+jos_curl_json PUT "$FOG_API" "$JSON_PAYLOAD" >/dev/null || die "INVENTORY: Inventory upload failed."
 
-if [ $? -eq 0 ]; then
-    log "Inventory upload complete."
-else
-    log "ERROR: Inventory upload failed."
-fi
+log "INVENTORY: Inventory upload complete."
 
 exit 0

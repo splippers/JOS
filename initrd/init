@@ -1,4 +1,8 @@
-#!/bin/sh
+#!/bin/bash
+# shellcheck shell=bash
+# Log errors to the standard location early.
+set -e
+exec 2>>/tmp/jos_error.log
 # JOS init script — orchestrates networking, registration, inventory, and task handling
 # Runs inside BusyBox initramfs
 
@@ -8,11 +12,9 @@
 export PATH=/bin:/sbin:/tools:/scripts
 export HOME=/
 
-log() {
-    echo "JOS-INIT: $1"
-}
+. /scripts/jos-common.sh
 
-log "Booting JOS minimal PXE environment..."
+log "INIT: Booting JOS minimal PXE environment..."
 
 # -----------------------------
 # Mount essential filesystems
@@ -24,58 +26,40 @@ mount -t devtmpfs devtmpfs /dev
 # -----------------------------
 # Networking
 # -----------------------------
-log "Bringing up networking..."
+log "INIT: Bringing up networking..."
 /scripts/jos-net.sh
-if [ $? -ne 0 ]; then
-    log "ERROR: Networking failed. Dropping to emergency shell."
-    exec /bin/sh
-fi
 
 # -----------------------------
 # Serial number detection
 # -----------------------------
-if [ ! -x /scripts/jos-serial.sh ]; then
-    log "ERROR: jos-serial.sh missing!"
-    exec /bin/sh
-fi
+[[ -x /scripts/jos-serial.sh ]] || die "INIT: jos-serial.sh missing!"
 
 SERIAL=$(/scripts/jos-serial.sh)
 
-if [ -z "$SERIAL" ]; then
-    log "ERROR: Could not determine serial number."
-    exec /bin/sh
-fi
+[[ -n "$SERIAL" ]] || die "INIT: Could not determine serial number."
 
-log "Serial detected: $SERIAL"
+log "INIT: Serial detected: $SERIAL"
 
 # -----------------------------
 # FOG registration
 # -----------------------------
-log "Registering host with FOG..."
+log "INIT: Registering/updating host with FOG..."
 /scripts/jos-register.sh "$SERIAL"
-if [ $? -ne 0 ]; then
-    log "ERROR: Registration failed. Dropping to shell."
-    exec /bin/sh
-fi
 
 # -----------------------------
 # Hardware inventory
 # -----------------------------
-log "Collecting hardware inventory..."
+log "INIT: Collecting hardware inventory..."
 /scripts/jos-inventory.sh "$SERIAL"
-if [ $? -ne 0 ]; then
-    log "ERROR: Inventory upload failed. Dropping to shell."
-    exec /bin/sh
-fi
 
 # -----------------------------
 # Task handling (multicast, deploy, etc.)
 # -----------------------------
-log "Waiting for FOG task assignment..."
+log "INIT: Waiting for FOG task assignment / multicast queue..."
 /scripts/jos-multicast.sh "$SERIAL"
 
 # -----------------------------
 # If we reach here, drop to shell
 # -----------------------------
-log "No further tasks. Dropping to shell."
+log "INIT: No further tasks. Dropping to shell."
 exec /bin/sh
