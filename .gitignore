@@ -1,0 +1,10 @@
+# Third‑party binaries (fetched at build time)
+initrd/bin/
+initrd/sbin/
+initrd/lib/
+initrd/lib64/
+initrd/usr/
+
+# Build artifacts
+build/out/
+build/tmp/
