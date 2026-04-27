@@ -1,0 +1,168 @@
+---
+description: Unified JOS rules — FOS replacement architecture + development standards (authoritative).
+alwaysApply: true
+---
+
+# JOS — Unified project rules (authoritative)
+
+This file replaces the split guidance that lived in `.cursor/rules.md` and `.cursor/rules/jos-standards.mdc`.  
+When anything conflicts elsewhere in the repo, **this file wins**.
+
+---
+
+## 1. Mission (FOG FOS replacement)
+
+JOS is a **Secure Boot–compatible** PXE micro‑OS intended as a **drop‑in replacement for FOG’s FOS** client environment: boot from network, register with FOG (or JOG), capture inventory, receive tasks, and perform imaging with **minimal technician interaction**.
+
+JOS is **not** a general-purpose Linux distribution. It is an **appliance-grade initramfs/runtime** (typically entirely from RAM).
+
+**FO S parity is the north star** for client-side behavior (registration, inventory, task handling, imaging transports). Implementation may start minimal and grow; do not regress Secure Boot or FOG API contracts when extending.
+
+---
+
+## 2. Environment targets
+
+- **Base OS (build host / JOG server context):** Ubuntu **26.04** where applicable.
+- **Boot mode:** **UEFI** with **Secure Boot enabled** on supported fleets (Dell Latitude / Precision).
+- **Hardware:** Assume **NVMe may sit behind Intel VMD**; support **AHCI vs RAID/VMD** realities on Dell imaging fleets.
+- **Networking:** Primary imaging traffic is expected on a dedicated **USB3 Ethernet** NIC (“Forbidden” NIC) — isolate from corporate LAN per deployment design.
+
+---
+
+## 3. Secure Boot (non‑negotiable)
+
+Never generate instructions or code that **breaks the Secure Boot chain**.
+
+**Immutable (do not rebuild or replace in-repo):**
+
+- `shimx64.efi` (Microsoft-signed)
+- `grubx64.efi` (Canonical-signed)
+- `vmlinuz` (Canonical-signed kernel)
+
+**Mutable:** the **initramfs** only (it does **not** need signing).  
+**iPXE** is **not** part of the measured Secure Boot chain (it chainloads into shim/GRUB).
+
+---
+
+## 4. Boot flow (preserve)
+
+Preserve this chain end-to-end:
+
+`iPXE → shimx64.efi → GRUB → signed Ubuntu kernel → JOS initramfs → /init → JOS runtime`
+
+---
+
+## 5. Repository layout
+
+The repo may evolve; **do not invent a second parallel tree** without an explicit migration.
+
+**Current shape (practical):**
+
+- `build/` — fetch static tools, assemble `initrd.img`
+- `initrd/` — initramfs root (`init`, `scripts/`, `tools/`, optional `lib*`)
+- `docs/` — architecture notes
+
+**FO S parity roadmap (may exist over time):** `config/`, richer `scripts/` split (`network`, `registration`, `inventory`, `imaging`), `partclone*` tooling, NFS imaging helpers — **only add when requested**, but design changes should move toward this modular split rather than ad-hoc sprawl.
+
+---
+
+## 6. Shell, compatibility, and logging
+
+### Shell dialect (resolved merge)
+
+- **Initramfs scripts** (`initrd/init`, `initrd/scripts/*.sh`): use **`#!/bin/bash`**, **`set -e`**, and **`exec 2>>/tmp/jos_error.log`** (or equivalent) so failures are visible.
+- **Prefer** BusyBox-friendly constructs where easy (initramfs is BusyBox-centric).
+- **Avoid** bash-only features unless necessary; if used, **document why** (FOG API JSON, arrays in complex cases, etc.).
+
+Build scripts under `build/` also use **bash** with `set -euo pipefail` where appropriate.
+
+### Error log
+
+Log errors to **`/tmp/jos_error.log`** (append). Human-readable `echo` logs are fine in addition.
+
+### FOG API
+
+- Use **`curl`** against the FOG REST API with headers:
+  - `fog-api-token: $FOG_API_KEY`
+  - `fog-user-token: $FOG_USER_TOKEN`
+- **Never hardcode secrets.** Load from **`$FOG_CONFIG_FILE`** (conventional path documented in code/docs).
+
+---
+
+## 7. Networking
+
+- Bring up interfaces with **BusyBox `udhcpc`** (or equivalent minimal DHCP client).
+- Capture DHCP **NEXT SERVER** (**BOOTP `siaddr`**) into **`/tmp/jos-next-server`** for automatic FOG targeting when `FOG_SERVER` is unset in config.
+- DHCP must be **deterministic** (wait for NICs, bounded retries). Avoid race-y “try once and die” unless explicitly a debug mode.
+
+---
+
+## 8. Hardware identity and inventory
+
+- **Primary ID:** `dmidecode -s system-serial-number` **when available**; fall back to sysfs DMI paths if needed.
+- **Inventory:** prefer **stable, parseable output** (JSON where practical). Sysfs/proc snapshots are acceptable for lightweight initramfs; richer tools (dmidecode/lshw) may be added for FOS parity when explicitly integrated into the build.
+- **Disk selection:** use **`lsblk -J`** and pick the **largest non-removable** block device; remember **VMD** may reshape visibility.
+
+---
+
+## 9. Multicast “suicide clause” (mandatory for multicast receive)
+
+Any path that runs **`udp-receiver`** must include a watchdog that:
+
+1. Inspects receiver output **every 10 seconds**
+2. If average throughput **< 30MB/s** for **3 consecutive** checks → **kill** the receiver and **`reboot`**
+
+This prevents one weak client from throttling a large multicast session.
+
+---
+
+## 10. Imaging / FOS parity (directional)
+
+For **true FOS replacement**, expect eventual support for:
+
+- NFS access to FOG image stores where applicable
+- **partclone‑based** imaging flows compatible with FOG task types
+- Progress reporting and safe cleanup on failure
+
+Until implemented, do not pretend these exist—**stub with clear TODOs** rather than fragile half-implementations.
+
+---
+
+## 11. iPXE / deployment integration
+
+iPXE entries should:
+
+- chainload **shim** correctly
+- pass kernel parameters cleanly
+- support a **debug** mode (kernel args) without breaking Secure Boot policy
+
+Example direction (not literal copy-paste requirement):
+
+`chain http://${fog-ip}/shimx64.efi`
+
+---
+
+## 12. Design principles
+
+- Appliance-grade reliability over cleverness
+- Minimal technician steps (PXE → walk away)
+- Deterministic behavior; fail loudly with actionable logs
+- Small initramfs; avoid heavy runtimes (no Python in the hot path unless explicitly approved)
+- Don’t modify shim/GRUB/kernel; don’t introduce systemd **inside the initramfs**
+
+---
+
+## 13. Cursor must avoid
+
+- Breaking Secure Boot chain components
+- Hardcoded FOG API keys or secrets
+- Fragile regex-only parsers for critical inventory when structured tools exist
+- Unbounded network loops without backoff/timeouts
+
+---
+
+## 14. Cursor should optimize for
+
+- FOS operational parity where it matters (tasks, imaging, resilience)
+- Reproducible builds (`build/` scripts, pinned artifacts)
+- Clear extension points (`initrd/scripts/*`) rather than monolithic growth

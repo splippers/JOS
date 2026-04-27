@@ -53,6 +53,11 @@ log "INIT: Collecting hardware inventory..."
 /scripts/jos-inventory.sh "$SERIAL"
 
 # -----------------------------
+# Imaging (NFS/partclone — stub until FOS parity)
+# -----------------------------
+/scripts/jos-imaging.sh "$SERIAL"
+
+# -----------------------------
 # Task handling (multicast, deploy, etc.)
 # -----------------------------
 log "INIT: Waiting for FOG task assignment / multicast queue..."

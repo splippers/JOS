@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 exec 2>>/tmp/jos_error.log
-# Register host with FOG using the FOG REST API
+# Register host — FOG GET …/host/search + dynamic POST paths from server version probe.
 
 SERIAL="$1"
 
@@ -11,13 +11,12 @@ SERIAL="$1"
 
 jos_load_fog_config
 
+FOG_BASE="$(jos_fog_base_url)"
+
+log "REGISTER: FOG≈${FOG_VERSION_RAW:-?} sort=${FOG_VER_SORTKEY:-0} host_paths=${JOS_FOG_HOST_CREATE_PATHS}"
+
 log "REGISTER: Registering/updating host $SERIAL with FOG..."
 
-# Base API endpoints
-FOG_BASE="http://${FOG_SERVER}/fog"
-HOST_EP="${FOG_BASE}/host"
-
-# Determine a primary MAC address from the active interface (fallback: first non-lo).
 ACTIVE_IFACE="$(cat /tmp/jos-active-iface 2>/dev/null || true)"
 if [[ -z "$ACTIVE_IFACE" ]]; then
   ACTIVE_IFACE="$(ls /sys/class/net | grep -v '^lo$' | head -n1 || true)"
@@ -27,33 +26,29 @@ MAC_RAW="$(cat "/sys/class/net/${ACTIVE_IFACE}/address" 2>/dev/null || true)"
 MAC="${MAC_RAW^^}"
 [[ -n "$MAC" ]] || die "REGISTER: Unable to determine MAC address (iface: ${ACTIVE_IFACE:-unknown})"
 
-# Check if host already exists (FOG host endpoint is by host ID typically; serial lookup varies by version).
-# We'll attempt GET /host/<serial> first; if that fails, we will just create and rely on FOG to de-dupe on MAC.
-EXISTING=""
-if EXISTING="$(jos_curl_json GET "${HOST_EP}/${SERIAL}" 2>/dev/null || true)"; then
-  true
-fi
-
-if echo "$EXISTING" | grep -q '"id"[[:space:]]*:'; then
-  log "REGISTER: Host already exists in FOG. Skipping creation."
+EXISTING_ID="$(jos_fog_resolve_host_id "$SERIAL")"
+if [[ -n "$EXISTING_ID" ]]; then
+  log "REGISTER: Host already present in FOG (host id=${EXISTING_ID}). Skipping creation."
   exit 0
 fi
 
-# Build JSON payload
+if [[ -z "${JOS_MODULES_JSON:-}" ]]; then
+  JOS_MODULES_JSON="$(jos_fog_default_modules_json_for_key "${FOG_VER_SORTKEY:-0}")"
+fi
+
 JSON_PAYLOAD=$(cat <<EOF
 {
   "name": "${SERIAL}",
   "description": "Auto-registered by JOS",
-  "serial": "${SERIAL}",
-  "macs": ["${MAC}"]
+  "macs": ["${MAC}"],
+  "modules": ${JOS_MODULES_JSON}
 }
 EOF
 )
 
-# Create host
-RESULT="$(jos_curl_json POST "${HOST_EP}" "${JSON_PAYLOAD}" || true)"
+RESULT="$(jos_fog_api_post_first_id "$FOG_BASE" "$JOS_FOG_HOST_CREATE_PATHS" "${JSON_PAYLOAD}" 2>/dev/null || true)"
 
-echo "$RESULT" | grep -q '"id"[[:space:]]*:' || die "REGISTER: Host registration failed. FOG response: ${RESULT}"
+jos_fog_json_has_entity_id "$RESULT" || die "REGISTER: Host registration failed. FOG response: ${RESULT}"
 
 log "REGISTER: Host successfully registered."
 

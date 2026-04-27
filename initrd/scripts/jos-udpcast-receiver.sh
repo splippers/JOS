@@ -2,9 +2,9 @@
 set -e
 exec 2>>/tmp/jos_error.log
 
-# Wrapper to run udp-receiver with the mandatory "suicide clause" monitor:
-# - Check output every 10 seconds
-# - If avg speed < 30MB/s for 3 consecutive checks -> kill receiver and reboot
+# udp-receiver wrapper with mandatory suicide clause:
+# every 10s inspect throughput; if parsed avg < 30MB/s for 3 consecutive checks → kill + reboot.
+# Unknown/zero parsed speed before the stream starts does not count as a strike.
 
 . /scripts/jos-common.sh
 
@@ -20,19 +20,15 @@ require_cmd reboot
 
 touch "$LOG_FILE"
 
-# Start receiver
 log "UDPCast: starting receiver (logging to $LOG_FILE)"
 "$UDP_RECEIVER" "$@" 2>&1 | tee -a "$LOG_FILE" &
 UDP_PID=$!
 
 weak=0
+# Ignore suicide strikes for the first N intervals (startup / parse settling). Default ~60s at 10s/step.
+GRACE_LEFT="${JOS_UDPCAST_GRACE_CHECKS:-6}"
 
 extract_speed_mb_s() {
-  # Best-effort parse of udp-receiver output. Different udpcast versions vary.
-  # We look for patterns like:
-  #   "Average rate: 45.6MB/s"
-  #   "avg 28.1 MB/s"
-  #   " 31.2MB/s"
   local s
   s="$(tail -n 50 "$LOG_FILE" | \
       sed -n -E 's/.*([Aa]verage[^0-9]*|avg[^0-9]*)([0-9]+(\.[0-9]+)?) *([Mm][Bb]\/s).*/\2/p' | \
@@ -40,10 +36,9 @@ extract_speed_mb_s() {
   if [[ -z "$s" ]]; then
     s="$(tail -n 50 "$LOG_FILE" | sed -n -E 's/.*[^0-9]([0-9]+(\.[0-9]+)?) *[Mm][Bb]\/s.*/\1/p' | tail -n1)"
   fi
-  echo "${s:-0}"
+  echo "${s:-}"
 }
 
-# If the receiver exits quickly (arg error, missing perms, etc.), do not hang.
 sleep 1
 if ! kill -0 "$UDP_PID" 2>/dev/null; then
   err "UDPCast: udp-receiver exited immediately; last output:"
@@ -55,9 +50,22 @@ while kill -0 "$UDP_PID" 2>/dev/null; do
   sleep 10
 
   speed="$(extract_speed_mb_s)"
-  # integer compare without bc: compare floor value
-  speed_int="${speed%.*}"
+  # Integer floor for threshold compare (bash-only; avoids slow float paths in initramfs).
+  speed_int="${speed%%.*}"
+  speed_int="${speed_int//[^0-9]/}"
   [[ -n "$speed_int" ]] || speed_int=0
+
+  if [[ -z "$speed" ]]; then
+    log "UDPCast: no throughput parse yet (waiting)"
+    weak=0
+    continue
+  fi
+
+  if [[ "$GRACE_LEFT" -gt 0 ]]; then
+    GRACE_LEFT=$((GRACE_LEFT - 1))
+    log "UDPCast: grace (${GRACE_LEFT} checks left after this) observed ~${speed}MB/s — not enforcing suicide clause yet"
+    continue
+  fi
 
   if [[ "$speed_int" -lt 30 ]]; then
     weak=$((weak + 1))
@@ -79,4 +87,3 @@ done
 
 wait "$UDP_PID" || true
 log "UDPCast: receiver exited"
-

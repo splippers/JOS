@@ -1,0 +1,12 @@
+#!ipxe
+# Example iPXE menu fragment — chainloads Microsoft shim (Secure Boot), not unsigned kernels.
+# Deploy as your DHCP/boot filename or include from a menu. Replace ${fog-ip} / URLs for your site.
+#
+# Boot flow (preserve): iPXE -> shimx64.efi -> GRUB -> signed kernel -> JOS initramfs -> /init
+#
+# Debug: append kernel cmdline params in GRUB/menu (e.g. break=mount) without replacing shim/kernel.
+
+isset ${fog-ip} || set fog-ip 10.0.0.5
+
+echo JOS: chaining to signed shim from ${fog-ip}
+chain http://${fog-ip}/shimx64.efi || shell

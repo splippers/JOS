@@ -1,8 +1,7 @@
 #!/bin/bash
 set -e
 exec 2>>/tmp/jos_error.log
-# JOS multicast queue logic (FOG API driven).
-# Goal: ensure a newly-booted host is queued into a multicast session with minimal admin touch.
+# JOS multicast queue logic (FOG REST: POST host/id/task, POST multicastsession/create).
 
 SERIAL="$1"
 
@@ -11,17 +10,11 @@ SERIAL="$1"
 [[ -n "$SERIAL" ]] || die "MULTICAST: No serial passed to multicast script."
 jos_load_fog_config
 
-log "MULTICAST: Preparing multicast queue for serial: $SERIAL"
+FOG_BASE="$(jos_fog_base_url)"
 
-# NOTE: FOG API structures vary by version; we implement a pragmatic flow:
-# - Create a multicast session (if configured) and associate this host task to it.
-# Required config variables in $FOG_CONFIG_FILE:
-#   JOS_IMAGE_ID: numeric image id in FOG
-#   JOS_MC_NAME: session name prefix (default "JOS-AUTO")
-#   JOS_MC_IFACE: interface name the server should use (default "eth0")
-#   JOS_MC_PORT: port base (default 57364)
-#   JOS_MC_SESSCLIENTS: how many clients to wait for (default 20)
-#   JOS_TASK_TYPE_ID: FOG taskTypeID for deploy (default 1; adjust to your environment)
+log "MULTICAST: FOG≈${FOG_VERSION_RAW:-?} mc_sess=${JOS_FOG_MC_SESSION_PATHS}"
+
+log "MULTICAST: Preparing multicast queue for serial: $SERIAL"
 
 : "${JOS_IMAGE_ID:=}"
 : "${JOS_MC_NAME:=JOS-AUTO}"
@@ -35,36 +28,31 @@ if [[ -z "$JOS_IMAGE_ID" ]]; then
   exit 0
 fi
 
-FOG_BASE="http://${FOG_SERVER}/fog"
-
-# 1) Find host id (best effort). Try GET /host/<serial> first.
-HOST_JSON="$(jos_curl_json GET "${FOG_BASE}/host/${SERIAL}" 2>/dev/null || true)"
-HOST_ID="$(echo "$HOST_JSON" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
+HOST_ID="$(jos_fog_resolve_host_id "$SERIAL")"
 
 if [[ -z "$HOST_ID" ]]; then
-  # As a fallback, we don't block the whole boot.
   log "MULTICAST: Could not resolve host id for ${SERIAL}; skipping multicast queue."
   exit 0
 fi
 
 log "MULTICAST: Resolved host id: ${HOST_ID}"
 
-# 2) Create a task for this host (deploy task).
 TASK_PAYLOAD="$(cat <<EOF
 {"taskTypeID": ${JOS_TASK_TYPE_ID}, "shutdown": true}
 EOF
 )"
 
-TASK_JSON="$(jos_curl_json POST "${FOG_BASE}/host/${HOST_ID}/task" "${TASK_PAYLOAD}" 2>/dev/null || true)"
-TASK_ID="$(echo "$TASK_JSON" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
-if [[ -z "$TASK_ID" ]]; then
-  log "MULTICAST: Could not create host task; response: ${TASK_JSON}"
-  exit 0
+jos_curl_json POST "${FOG_BASE}/host/${HOST_ID}/task" "${TASK_PAYLOAD}" >/dev/null 2>&1 || \
+  log "MULTICAST: task API returned non-zero (task may still be queued); continuing"
+
+HOST_AFTER="$(jos_curl_json GET "${FOG_BASE}/host/${HOST_ID}" 2>/dev/null || true)"
+TASK_ID="$(jos_fog_extract_task_id_from_host_json "$HOST_AFTER")"
+if [[ -n "$TASK_ID" ]]; then
+  log "MULTICAST: Host task id (from host record): ${TASK_ID}"
+else
+  log "MULTICAST: Could not read task id from host JSON (FOG may omit body on POST); continuing."
 fi
 
-log "MULTICAST: Created host task id: ${TASK_ID}"
-
-# 3) Create a multicast session.
 MC_NAME="${JOS_MC_NAME}-${JOS_IMAGE_ID}"
 MC_PAYLOAD="$(cat <<EOF
 {
@@ -80,8 +68,8 @@ MC_PAYLOAD="$(cat <<EOF
 EOF
 )"
 
-MC_JSON="$(jos_curl_json POST "${FOG_BASE}/multicastsession" "${MC_PAYLOAD}" 2>/dev/null || true)"
-MC_ID="$(echo "$MC_JSON" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)"
+MC_JSON="$(jos_fog_api_post_first_id "$FOG_BASE" "$JOS_FOG_MC_SESSION_PATHS" "${MC_PAYLOAD}" 2>/dev/null || true)"
+MC_ID="$(jos_fog_extract_json_id "$MC_JSON")"
 if [[ -z "$MC_ID" ]]; then
   log "MULTICAST: Could not create multicast session; response: ${MC_JSON}"
   exit 0
@@ -89,31 +77,26 @@ fi
 
 log "MULTICAST: Created multicast session id: ${MC_ID}"
 
-# 4) Associate the host task to the multicast session.
-ASSOC_PAYLOAD="$(cat <<EOF
+if [[ -n "$TASK_ID" ]]; then
+  ASSOC_PAYLOAD="$(cat <<EOF
 {"msID": ${MC_ID}, "taskID": ${TASK_ID}}
 EOF
 )"
-
-ASSOC_JSON="$(jos_curl_json POST "${FOG_BASE}/multicastsessionassociation" "${ASSOC_PAYLOAD}" 2>/dev/null || true)"
-if echo "$ASSOC_JSON" | grep -q '"id"[[:space:]]*:'; then
-  log "MULTICAST: Associated host task to multicast session."
+  ASSOC_JSON="$(jos_fog_api_post_first_id "$FOG_BASE" "$JOS_FOG_MC_ASSOC_PATHS" "${ASSOC_PAYLOAD}" 2>/dev/null || true)"
+  if jos_fog_json_has_entity_id "$ASSOC_JSON"; then
+    log "MULTICAST: Associated host task to multicast session."
+  else
+    log "MULTICAST: Could not associate task to multicast session; response: ${ASSOC_JSON}"
+  fi
 else
-  log "MULTICAST: Could not associate task to multicast session; response: ${ASSOC_JSON}"
+  log "MULTICAST: No task id from host record — skipping session association (check deploy task / FOG logs)."
 fi
 
-# 5) Start receiving (client-side) using udp-receiver with the required watchdog.
-# This keeps the technician experience "PXE and walk away". The server side (JOG/FOG)
-# is responsible for starting udp-sender for the same portbase/session.
 ACTIVE_IFACE="$(cat /tmp/jos-active-iface 2>/dev/null || true)"
 [[ -n "$ACTIVE_IFACE" ]] || ACTIVE_IFACE="eth0"
 
-# Rendezvous defaults to DHCP NEXT SERVER (FOG_SERVER).
 RDV_ADDR="${JOS_MC_RDV_ADDR:-$FOG_SERVER}"
 
-# Provide escape hatch for custom args (advanced troubleshooting / special networks).
-# Example:
-#   JOS_UDP_RECEIVER_EXTRA_ARGS="--mcast-data-address 239.0.0.1 --ttl 32"
 : "${JOS_UDP_RECEIVER_EXTRA_ARGS:=}"
 
 log "MULTICAST: Starting udp-receiver (iface=${ACTIVE_IFACE} rdv=${RDV_ADDR} portbase=${JOS_MC_PORT})"
@@ -125,5 +108,3 @@ exec /scripts/jos-udpcast-receiver.sh \
   --nokbd \
   --nopointopoint \
   ${JOS_UDP_RECEIVER_EXTRA_ARGS}
-
-exit 0

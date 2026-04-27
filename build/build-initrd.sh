@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build JOS initramfs
 
-set -e
+set -euo pipefail
 
 # Allow running from any working directory.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,10 +9,9 @@ cd "$ROOT"
 
 bash "$ROOT/build/fetch-busybox.sh"
 bash "$ROOT/build/fetch-curl.sh"
+bash "$ROOT/build/fetch-dmidecode.sh"
 # udpcast tools (udp-receiver/udp-sender) for multicast imaging
 bash "$ROOT/build/fetch-udpcast.sh"
-# dmidecode/lshw/hwinfo static assets are not reliably available upstream.
-# JOS scripts primarily use sysfs/procfs to keep the initrd small and robust.
 
 echo "Building JOS initramfs..."
 
