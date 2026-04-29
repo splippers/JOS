@@ -18,6 +18,12 @@ JOS serves as a replacement imaging solution for FOG servers that requires:
 - FOG imaging server integration
 - Modern deployment capabilities
 
+## FOS replacement roadmap (FOG parity)
+
+- **Parity checklist**: `docs/fos-fog-parity-checklist.md`
+- **Fork/refactor plan**: `docs/fos-fork-refactor-plan.md`
+- **Architecture / boot chain**: `docs/architecture.md`
+
 ## Getting Started
 
 To get started with JOS:
