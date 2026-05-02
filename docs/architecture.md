@@ -18,7 +18,8 @@ See also: `config/ipxe/jos.ipxe.example` for an iPXE→shim chain example.
 | Identity | `jos-serial.sh` | Service tag / serial — **`dmidecode -s system-serial-number`** when present, sysfs DMI fallback |
 | Registration | `jos-register.sh` | `GET …/host/search` then `POST …/host/create` (API tokens from `$FOG_CONFIG_FILE`) |
 | Inventory | `jos-inventory.sh`, `jos-disk.sh` | FOG **Inventory** fields (`sysserial`, `mem`, `hdmodel`, …) + sysfs / **`lsblk -J`** sizing |
-| Imaging stub | `jos-imaging.sh` | NFS/partclone parity — disabled until explicitly implemented |
+| FOG tasks | `jos-fog-task-runner.sh` | Poll `GET …/host/{id}` (jq), dispatch **deploy/capture** by `taskTypeID` (FOG Route::task) |
+| Unicast imaging | `jos-imaging-unicast.sh`, `jos-nfs.sh` | NFS mount `${FOG_SERVER}:/images` + **`partclone`** restore of `d1p*.img` (gated by **`JOS_IMAGING_ALLOW_DISK_WRITE`**) |
 | Multicast | `jos-multicast.sh`, `jos-udpcast-receiver.sh` | FOG API queue + **`udp-receiver`** with suicide-clause watchdog |
 
 ## DHCP NEXT SERVER as FOG target

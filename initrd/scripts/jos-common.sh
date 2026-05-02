@@ -409,3 +409,43 @@ jos_curl_json() {
   cat "$tmp_body"
   rm -f "$tmp_body" "$tmp_hdr" || true
 }
+
+# --- jq helpers (optional but recommended; bundled into initrd by build scripts) ---
+jos_jq_bin() {
+  if [[ -x /tools/jq ]]; then
+    echo "/tools/jq"
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    command -v jq
+    return 0
+  fi
+  echo ""
+  return 1
+}
+
+# Unwrap FOG API envelopes: prefer `.data` when present.
+jos_fog_json_core() {
+  local json="$1"
+  local jb
+  jb="$(jos_jq_bin || true)"
+  [[ -n "$jb" ]] || { printf '%s' "$json"; return 0; }
+  printf '%s' "$json" | "$jb" -c 'if type == "object" and has("data") then .data else . end' 2>/dev/null || printf '%s' "$json"
+}
+
+jos_fog_jq() {
+  local json="$1"
+  local query="$2"
+  local jb
+  jb="$(jos_jq_bin || true)"
+  [[ -n "$jb" ]] || return 1
+  printf '%s' "$json" | "$jb" -r "$query" 2>/dev/null
+}
+
+jos_fog_get_image_json() {
+  local image_id="$1"
+  local base url
+  base="$(jos_fog_base_url)"
+  url="${base}/image/${image_id}"
+  jos_curl_json GET "$url" 2>/dev/null || true
+}

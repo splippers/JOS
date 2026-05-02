@@ -9,7 +9,7 @@ exec 2>>/tmp/jos_error.log
 # -----------------------------
 # Basic environment setup
 # -----------------------------
-export PATH=/bin:/sbin:/tools:/scripts
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/tools:/scripts
 export HOME=/
 
 . /scripts/jos-common.sh
@@ -53,15 +53,18 @@ log "INIT: Collecting hardware inventory..."
 /scripts/jos-inventory.sh "$SERIAL"
 
 # -----------------------------
-# Imaging (NFS/partclone — stub until FOS parity)
+# FOG tasks (deploy/capture — same REST semantics as classic FOS workflows)
 # -----------------------------
-/scripts/jos-imaging.sh "$SERIAL"
+log "INIT: Starting FOG task runner..."
+/scripts/jos-fog-task-runner.sh "$SERIAL" || log "INIT: task runner exited $?"
 
 # -----------------------------
-# Task handling (multicast, deploy, etc.)
+# Optional multicast automation (legacy env-driven queue — keep for lab workflows)
 # -----------------------------
-log "INIT: Waiting for FOG task assignment / multicast queue..."
-/scripts/jos-multicast.sh "$SERIAL"
+if [[ -n "${JOS_IMAGE_ID:-}" ]]; then
+  log "INIT: JOS_IMAGE_ID set — legacy multicast queue path..."
+  /scripts/jos-multicast.sh "$SERIAL" || log "INIT: multicast helper exited $?"
+fi
 
 # -----------------------------
 # If we reach here, drop to shell

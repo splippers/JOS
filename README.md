@@ -119,12 +119,21 @@ If `JOS_IMAGE_ID` is set, `jos-multicast.sh` will:
 Server-side requirement (your portable JOG/FOG server):
 - start `udp-sender` for the same `portbase` and rendezvous address so clients can join.
 
+## FOG deploy / capture tasks (unicast — FOS-style workflow)
+
+After registration + inventory, **`jos-fog-task-runner.sh`** polls **`GET /fog/host/{id}`** and executes tasks by **`taskTypeID`** (deploy/capture/debug variants per FOG docs).
+
+- **Deploy (`taskTypeID` 1 / 13 / 15)**: mounts **`${FOG_SERVER}:/images`**, resolves the image directory via **`GET /fog/image/{imageID}`**, restores **`d1.partitions`** (needs **`sfdisk`** baked into initrd at build time) then restores **`d1p*.img`** with **`partclone`**.
+- **Destructive writes are gated**: export **`JOS_IMAGING_ALLOW_DISK_WRITE=1`** (and usually confirm imaging intent in your process). Without it, deploy refuses to touch disks.
+- **NFS client**: the initrd bundles **`mount.nfs`** from the build host (`nfs-common`). You still need **kernel NFS client support** (modules or built-in) for mounts to succeed at runtime.
+- **Capture (`taskTypeID` 2 / 14)**: not implemented yet (`jos-imaging-unicast.sh` exits with a clear message).
+
 ### What the technician does
 
 - Power on target laptop
 - Press **F12**
 - Select **Boot from IPv4**
-- Walk away (JOS will DHCP, discover NEXT SERVER, register/update the host, upload inventory, and queue multicast if enabled)
+- Walk away (JOS will DHCP, discover NEXT SERVER, register/update the host, upload inventory, wait for a FOG task, then execute imaging when scheduled — **or** queue multicast if `JOS_IMAGE_ID` is set)
 
 ## Repository layout
 
