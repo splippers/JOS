@@ -175,25 +175,3 @@ Domestic Gamification Family
   Type: Game | Intent: Engine | Audience: Households
 - ChoreWars
   Type: Meta-System | Intent: Engine | Audience: General Public
-
---------------------------------------------------
-
-NOTE TO FUTURE-YOU
-
-This system exists to prevent emotional misclassification of projects.
-
-Not every project must:
-- Generate money
-- Gain popularity
-- Become a product
-
-Some projects exist to:
-- Build skill
-- Enable others
-- Prove competence
-- Preserve ideas safely
-
-Those projects are not failures.
-They are structural supports.
-
-==================================================
