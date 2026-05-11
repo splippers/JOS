@@ -39,7 +39,7 @@ jos_largest_fixed_disk_sysfs() {
     fi
 
     sz="$(cat "${devpath}/size" 2>/dev/null || echo 0)"
-    [[ "$sz" =~ ^[0-9]+$ ]] || continue
+    case "$sz" in *[!0-9]*|"") continue ;; esac
     sz=$((sz * sector_bytes))
 
     if [[ "$sz" -gt "$best_bytes" ]]; then

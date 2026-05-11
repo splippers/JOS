@@ -22,12 +22,22 @@ echo "Building JOS initramfs..."
 
 mkdir -p build/out
 
+# Ensure required mountpoint directories exist in the initrd tree.
+for _d in proc sys dev tmp mnt run etc/fog; do
+  mkdir -p "$ROOT/initrd/$_d"
+done
+
 # Ensure the initramfs entrypoint is executable.
 chmod +x "$ROOT/initrd/init"
 chmod +x "$ROOT/initrd/scripts/"*.sh 2>/dev/null || true
 
 cd "$ROOT/initrd"
-find . | cpio -H newc -o > ../build/out/initrd.img
+find . \
+  -not -path './.git/*' \
+  -not -name '.gitkeep' \
+  | cpio -H newc -o \
+  | gzip -9 \
+  > ../build/out/initrd.img
 cd ..
 
-echo "Initramfs built: build/out/initrd.img"
+echo "Initramfs built: build/out/initrd.img ($(du -sh ../jos/build/out/initrd.img 2>/dev/null | cut -f1 || echo '?'))"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 # Register host — FOG GET …/host/search + dynamic POST paths from server version probe.
@@ -23,7 +23,7 @@ if [[ -z "$ACTIVE_IFACE" ]]; then
 fi
 
 MAC_RAW="$(cat "/sys/class/net/${ACTIVE_IFACE}/address" 2>/dev/null || true)"
-MAC="${MAC_RAW^^}"
+MAC="$(printf '%s' "$MAC_RAW" | tr '[:lower:]' '[:upper:]')"
 [[ -n "$MAC" ]] || die "REGISTER: Unable to determine MAC address (iface: ${ACTIVE_IFACE:-unknown})"
 
 EXISTING_ID="$(jos_fog_resolve_host_id "$SERIAL")"

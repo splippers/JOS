@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # shellcheck shell=bash
 # Log errors to the standard location early.
 set -e
@@ -44,13 +44,13 @@ log "INIT: Serial detected: $SERIAL"
 # FOG registration
 # -----------------------------
 log "INIT: Registering/updating host with FOG..."
-/scripts/jos-register.sh "$SERIAL"
+/scripts/jos-register.sh "$SERIAL" || log "INIT: Registration non-fatal — continuing"
 
 # -----------------------------
 # Hardware inventory
 # -----------------------------
 log "INIT: Collecting hardware inventory..."
-/scripts/jos-inventory.sh "$SERIAL"
+/scripts/jos-inventory.sh "$SERIAL" || log "INIT: Inventory non-fatal — continuing"
 
 # -----------------------------
 # FOG tasks (deploy/capture — same REST semantics as classic FOS workflows)

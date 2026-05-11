@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 # JOS multicast queue logic (FOG REST: POST host/id/task, POST multicastsession/create).

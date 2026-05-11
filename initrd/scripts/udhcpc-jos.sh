@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 

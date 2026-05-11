@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 
@@ -50,10 +50,9 @@ while kill -0 "$UDP_PID" 2>/dev/null; do
   sleep 10
 
   speed="$(extract_speed_mb_s)"
-  # Integer floor for threshold compare (bash-only; avoids slow float paths in initramfs).
   speed_int="${speed%%.*}"
-  speed_int="${speed_int//[^0-9]/}"
-  [[ -n "$speed_int" ]] || speed_int=0
+  speed_int="$(printf '%s' "$speed_int" | tr -cd '0-9')"
+  [ -n "$speed_int" ] || speed_int=0
 
   if [[ -z "$speed" ]]; then
     log "UDPCast: no throughput parse yet (waiting)"

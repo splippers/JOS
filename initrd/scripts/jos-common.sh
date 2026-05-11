@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # shellcheck shell=bash
 # Shared helpers for JOS initramfs scripts (sourced — do not use `exec` here).
 set -e
@@ -10,7 +10,9 @@ log() {
 }
 
 err() {
-  echo "[JOS-ERROR][$(date +%H:%M:%S)] $*" | tee -a "$JOS_ERROR_LOG" >&2
+  local _msg="[JOS-ERROR][$(date +%H:%M:%S)] $*"
+  echo "$_msg"
+  echo "$_msg" >>"$JOS_ERROR_LOG" 2>/dev/null || true
 }
 
 die() {
@@ -96,7 +98,8 @@ jos_load_fog_config() {
     die "FOG config file not found: $FOG_CONFIG_FILE"
   fi
   # shellcheck disable=SC1090
-  source "$FOG_CONFIG_FILE"
+  # shellcheck disable=SC1090
+  . "$FOG_CONFIG_FILE"
 
   if [[ -z "${FOG_SERVER:-}" && -f /tmp/jos-next-server ]]; then
     FOG_SERVER="$(cat /tmp/jos-next-server 2>/dev/null || true)"
@@ -118,14 +121,13 @@ JOS_FOG_PROFILE_FILE="/tmp/jos-fog-profile.env"
 jos_fog_http_get_plain() {
   local url="$1"
   local curl_bin="/tools/curl"
-  [[ -x "$curl_bin" ]] || curl_bin=""
-  [[ -n "$curl_bin" ]] || return 1
-  local tls=()
-  [[ "${FOG_SSL_INSECURE:-0}" =~ ^(1|true|yes|on)$ ]] && tls+=( -k )
-  if [[ -n "${FOG_CA_BUNDLE:-}" && -f "${FOG_CA_BUNDLE}" ]]; then
-    tls+=( --cacert "${FOG_CA_BUNDLE}" )
-  fi
-  "${curl_bin}" "${tls[@]}" -fsS "$url" 2>/dev/null || return 1
+  [ -x "$curl_bin" ] || curl_bin=""
+  [ -n "$curl_bin" ] || return 1
+  local tls_k="" tls_cacert=""
+  [ "${FOG_SSL_INSECURE:-0}" = "1" ] && tls_k="-k"
+  [ -n "${FOG_CA_BUNDLE:-}" ] && [ -f "${FOG_CA_BUNDLE}" ] && tls_cacert="--cacert ${FOG_CA_BUNDLE}"
+  # shellcheck disable=SC2086
+  "${curl_bin}" $tls_k $tls_cacert -fsS "$url" 2>/dev/null || return 1
 }
 
 jos_fog_semver_to_sortkey() {
@@ -224,12 +226,12 @@ jos_fog_default_modules_json_for_key() {
 
 jos_fog_write_profile_file() {
   {
-    echo "export FOG_VERSION_RAW=$(printf '%q' "$FOG_VERSION_RAW")"
-    echo "export FOG_VER_SORTKEY=$(printf '%q' "$FOG_VER_SORTKEY")"
-    echo "export JOS_FOG_HOST_CREATE_PATHS=$(printf '%q' "$JOS_FOG_HOST_CREATE_PATHS")"
-    echo "export JOS_FOG_INV_CREATE_PATHS=$(printf '%q' "$JOS_FOG_INV_CREATE_PATHS")"
-    echo "export JOS_FOG_MC_SESSION_PATHS=$(printf '%q' "$JOS_FOG_MC_SESSION_PATHS")"
-    echo "export JOS_FOG_MC_ASSOC_PATHS=$(printf '%q' "$JOS_FOG_MC_ASSOC_PATHS")"
+    printf 'export FOG_VERSION_RAW="%s"\n'          "$FOG_VERSION_RAW"
+    printf 'export FOG_VER_SORTKEY="%s"\n'          "$FOG_VER_SORTKEY"
+    printf 'export JOS_FOG_HOST_CREATE_PATHS="%s"\n' "$JOS_FOG_HOST_CREATE_PATHS"
+    printf 'export JOS_FOG_INV_CREATE_PATHS="%s"\n'  "$JOS_FOG_INV_CREATE_PATHS"
+    printf 'export JOS_FOG_MC_SESSION_PATHS="%s"\n'  "$JOS_FOG_MC_SESSION_PATHS"
+    printf 'export JOS_FOG_MC_ASSOC_PATHS="%s"\n'    "$JOS_FOG_MC_ASSOC_PATHS"
   } >"$JOS_FOG_PROFILE_FILE"
 }
 
@@ -285,20 +287,18 @@ jos_fog_probe_and_save() {
 }
 
 jos_fog_ensure_profile() {
-  if [[ "${JOS_FOG_SKIP_VERSION_PROBE:-0}" =~ ^(1|true|yes|on)$ ]]; then
+  case "${JOS_FOG_SKIP_VERSION_PROBE:-0}" in 1|true|yes|on)
     jos_fog_apply_default_profile
-    # shellcheck disable=SC1090
-    source "$JOS_FOG_PROFILE_FILE"
+    . "$JOS_FOG_PROFILE_FILE"
     return 0
-  fi
-  if [[ -f "$JOS_FOG_PROFILE_FILE" && "${JOS_FOG_FORCE_PROBE:-0}" != "1" ]]; then
-    # shellcheck disable=SC1090
-    source "$JOS_FOG_PROFILE_FILE"
+  esac
+  if [ -f "$JOS_FOG_PROFILE_FILE" ] && [ "${JOS_FOG_FORCE_PROBE:-0}" != "1" ]; then
+    . "$JOS_FOG_PROFILE_FILE"
     return 0
   fi
   jos_fog_probe_and_save || jos_fog_apply_default_profile
   # shellcheck disable=SC1090
-  source "$JOS_FOG_PROFILE_FILE"
+  . "$JOS_FOG_PROFILE_FILE"
 }
 
 # POST JSON to first path in list that returns an entity id (FOG create routes).
@@ -349,29 +349,29 @@ jos_curl_json() {
   local data="${1:-}"
 
   local curl_bin="/tools/curl"
-  [[ -x "$curl_bin" ]] || curl_bin=""
+  [ -x "$curl_bin" ] || curl_bin=""
 
-  if [[ -n "$curl_bin" ]]; then
-    local tls=()
-    [[ "${FOG_SSL_INSECURE:-0}" =~ ^(1|true|yes|on)$ ]] && tls+=( -k )
-    if [[ -n "${FOG_CA_BUNDLE:-}" && -f "${FOG_CA_BUNDLE}" ]]; then
-      tls+=( --cacert "${FOG_CA_BUNDLE}" )
-    fi
-    if [[ -n "$data" ]]; then
-      "${curl_bin}" "${tls[@]}" -fsS -X "$method" "$url" \
+  if [ -n "$curl_bin" ]; then
+    local tls_k="" tls_cacert=""
+    [ "${FOG_SSL_INSECURE:-0}" = "1" ] && tls_k="-k"
+    [ -n "${FOG_CA_BUNDLE:-}" ] && [ -f "${FOG_CA_BUNDLE}" ] && tls_cacert="--cacert ${FOG_CA_BUNDLE}"
+    if [ -n "$data" ]; then
+      # shellcheck disable=SC2086
+      "${curl_bin}" $tls_k $tls_cacert -fsS -X "$method" "$url" \
         -H "Content-Type: application/json" \
         -H "fog-api-token: ${FOG_API_KEY}" \
         -H "fog-user-token: ${FOG_USER_TOKEN}" \
         --data "$data"
     else
-      "${curl_bin}" "${tls[@]}" -fsS -X "$method" "$url" \
+      # shellcheck disable=SC2086
+      "${curl_bin}" $tls_k $tls_cacert -fsS -X "$method" "$url" \
         -H "fog-api-token: ${FOG_API_KEY}" \
         -H "fog-user-token: ${FOG_USER_TOKEN}"
     fi
     return 0
   fi
 
-  # Fallback: BusyBox wget — TLS flags not applied (prefer bundling /tools/curl).
+  # Fallback: BusyBox wget (no TLS flag support — prefer bundled /tools/curl).
   local wget_bin="wget"
   require_cmd "$wget_bin"
 
@@ -379,30 +379,28 @@ jos_curl_json() {
   local tmp_hdr="/tmp/jos_http_hdr.$$"
   rm -f "$tmp_body" "$tmp_hdr" || true
 
-  local headers=(
-    "--header=fog-api-token: ${FOG_API_KEY}"
-    "--header=fog-user-token: ${FOG_USER_TOKEN}"
-  )
-  if [[ -n "$data" ]]; then
-    headers+=("--header=Content-Type: application/json")
+  local hdr_api="--header=fog-api-token: ${FOG_API_KEY}"
+  local hdr_user="--header=fog-user-token: ${FOG_USER_TOKEN}"
+
+  if [ -n "$data" ]; then
     if "$wget_bin" --help 2>&1 | grep -q -- '--method' && "$wget_bin" --help 2>&1 | grep -q -- '--body-data'; then
       "$wget_bin" -qO "$tmp_body" -S --server-response \
         --method="$method" \
-        "${headers[@]}" \
+        "$hdr_api" "$hdr_user" \
+        "--header=Content-Type: application/json" \
         --body-data="$data" \
         "$url" 2>"$tmp_hdr" || die "HTTP ${method} failed (wget)"
     else
-      if [[ "$method" != "POST" ]]; then
-        die "wget fallback lacks --method; cannot ${method} ${url}"
-      fi
+      [ "$method" = "POST" ] || die "wget fallback lacks --method; cannot ${method} ${url}"
       "$wget_bin" -qO "$tmp_body" -S --server-response \
-        "${headers[@]}" \
+        "$hdr_api" "$hdr_user" \
+        "--header=Content-Type: application/json" \
         --post-data="$data" \
         "$url" 2>"$tmp_hdr" || die "HTTP POST failed (wget)"
     fi
   else
     "$wget_bin" -qO "$tmp_body" -S --server-response \
-      "${headers[@]}" \
+      "$hdr_api" "$hdr_user" \
       "$url" 2>"$tmp_hdr" || die "HTTP GET failed (wget)"
   fi
 
@@ -448,4 +446,26 @@ jos_fog_get_image_json() {
   base="$(jos_fog_base_url)"
   url="${base}/image/${image_id}"
   jos_curl_json GET "$url" 2>/dev/null || true
+}
+
+# Tell FOG the task has started (moves queued → in-progress in the FOG UI).
+jos_fog_task_checkin() {
+  local task_id="$1"
+  [[ -n "$task_id" ]] || return 0
+  local base
+  base="$(jos_fog_base_url)"
+  jos_curl_json PUT "${base}/task/${task_id}" '{"stateID":2}' >/dev/null 2>&1 || \
+    log "FOG: task checkin non-fatal (task_id=${task_id})"
+}
+
+# Tell FOG the task is done — DELETE removes it from the queue so next boot is clean.
+jos_fog_task_done() {
+  local task_id="$1"
+  [[ -n "$task_id" ]] || return 0
+  local base
+  base="$(jos_fog_base_url)"
+  if ! jos_curl_json DELETE "${base}/task/${task_id}" >/dev/null 2>&1; then
+    jos_curl_json PUT "${base}/task/${task_id}" '{"stateID":3}' >/dev/null 2>&1 || \
+      log "FOG: task done non-fatal (task_id=${task_id})"
+  fi
 }

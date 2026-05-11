@@ -1,0 +1,24 @@
+# JOS FOG client configuration — copy to /etc/fog/jos.conf and populate.
+# Baked into the initramfs at build time by build/build-initrd.sh.
+
+FOG_SERVER=10.0.0.1
+FOG_API_KEY=your-global-api-token-here
+FOG_USER_TOKEN=your-user-api-token-here
+
+# Optional: force HTTPS (set FOG_SSL_INSECURE=1 for self-signed certs)
+#FOG_USE_SSL=0
+#FOG_SSL_INSECURE=0
+#FOG_CA_BUNDLE=/etc/fog/ca.pem
+
+# Optional: override API path style (auto|modern|legacy)
+#JOS_FOG_API_STYLE=auto
+
+# Optional: imaging safety gate — must be 1 to allow disk writes
+#JOS_IMAGING_ALLOW_DISK_WRITE=0
+
+# Optional: write MBR bootsector from d1.mbr (legacy BIOS images)
+#JOS_IMAGING_WRITE_MBR=0
+
+# Optional: task polling interval and max wait (seconds)
+#JOS_TASK_POLL_SEC=5
+#JOS_TASK_WAIT_SEC=7200

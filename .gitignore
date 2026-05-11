@@ -40,3 +40,6 @@ build/out/
 /udp-receiver
 /udp-sender
 
+
+# Local rolling log (FLINTNEEDLE / CSOP); not committed
+TRANSCRIPT.md

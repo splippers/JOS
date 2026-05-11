@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 # Poll FOG for host tasks (FOG REST: GET /host/{id}) and dispatch imaging like classic FOS workflows.
@@ -46,15 +46,24 @@ while [[ "$elapsed" -lt "$MAX_WAIT" ]]; do
   case "$TYPE" in
     1|13|15)
       [[ -n "$IID" ]] || die "TASKS: deploy task missing imageID"
+      jos_fog_task_checkin "$TID"
       exec /scripts/jos-imaging-unicast.sh deploy "$SERIAL" "$HOST_ID" "$TID" "$IID"
       ;;
     2|14)
       [[ -n "$IID" ]] || die "TASKS: capture task missing imageID"
+      jos_fog_task_checkin "$TID"
       exec /scripts/jos-imaging-unicast.sh capture "$SERIAL" "$HOST_ID" "$TID" "$IID"
       ;;
-    8)
+    8|16)
       log "TASKS: inventory task — inventory already uploaded earlier this boot; exiting runner."
+      jos_fog_task_done "$TID"
       exit 0
+      ;;
+    12)
+      [[ -n "$IID" ]] || die "TASKS: multicast task missing imageID"
+      jos_fog_task_checkin "$TID"
+      export JOS_IMAGE_ID="$IID"
+      exec /scripts/jos-multicast.sh "$SERIAL"
       ;;
     *)
       die "TASKS: unsupported task typeID=${TYPE} — extend jos-fog-task-runner.sh (FOG Route::task)"

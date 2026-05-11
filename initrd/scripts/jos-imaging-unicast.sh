@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 exec 2>>/tmp/jos_error.log
 # Unicast deploy/capture (FOG task types 1/2 and debug variants). SMB-safe: disk writes are gated.
@@ -31,8 +31,8 @@ jos_part_path_for_index() {
 }
 
 jos_pick_partclone_bin_for_fstype() {
-  local fs="$1"
-  fs="${fs,,}"
+  local fs
+  fs="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$fs" in
     *ntfs*) echo "/tools/partclone.ntfs" ;;
     *ext*) echo "/tools/partclone.extfs" ;;
@@ -81,28 +81,28 @@ deploy_from_nfs() {
     "$sf" --force "$disk_dev" <"${imgdir}/d1.partitions"
     sleep 2
   elif [[ -f "${imgdir}/d1.mbr" ]]; then
-    if [[ "${JOS_IMAGING_WRITE_MBR:-0}" =~ ^(1|true|yes|on)$ ]]; then
-      log "IMAGING: writing MBR bootsector (446 bytes) from d1.mbr"
-      dd if="${imgdir}/d1.mbr" of="$disk_dev" bs=446 count=1 conv=fsync
-      sleep 1
-    else
-      log "IMAGING: d1.mbr present but JOS_IMAGING_WRITE_MBR not enabled — skipping MBR write"
-    fi
+    case "${JOS_IMAGING_WRITE_MBR:-0}" in
+      1|true|yes|on)
+        log "IMAGING: writing MBR bootsector (446 bytes) from d1.mbr"
+        dd if="${imgdir}/d1.mbr" of="$disk_dev" bs=446 count=1 conv=fsync
+        sleep 1
+        ;;
+      *)
+        log "IMAGING: d1.mbr present but JOS_IMAGING_WRITE_MBR not enabled — skipping MBR write"
+        ;;
+    esac
   else
     log "IMAGING: no d1.partitions or d1.mbr — assuming partitions already exist"
   fi
 
-  shopt -s nullglob
-  local imgs=("${imgdir}"/d1p*.img)
-  shopt -u nullglob
-  [[ "${#imgs[@]}" -gt 0 ]] || die "IMAGING: no d1p*.img files under ${imgdir}"
-
-  local f num fs pctool
-  for f in "${imgs[@]}"; do
+  local f num fs pctool found=0
+  for f in "${imgdir}"/d1p*.img; do
+    [ -e "$f" ] || continue
+    found=1
     num="$(basename "$f")"
     num="${num#d1p}"
     num="${num%.img}"
-    [[ "$num" =~ ^[0-9]+$ ]] || die "IMAGING: bad partition image name: $f"
+    case "$num" in *[!0-9]*|"") die "IMAGING: bad partition image name: $f" ;; esac
 
     fs="$(jos_fstype_for_part_from_file "${imgdir}/d1.original.fstypes" "$num")"
     pctool="$(jos_pick_partclone_bin_for_fstype "$fs")"
@@ -118,16 +118,69 @@ deploy_from_nfs() {
     log "IMAGING: restoring ${f} → ${dest} using ${pctool}"
     "$pctool" -r -s "$f" -o "$dest"
   done
+  [ "$found" -eq 1 ] || die "IMAGING: no d1p*.img files under ${imgdir}"
 
   log "IMAGING: deploy finished."
-  if [[ "${JOS_IMAGING_REBOOT_AFTER_DEPLOY:-1}" =~ ^(1|true|yes|on)$ ]]; then
+  jos_fog_task_done "${TASK_ID:-}"
+  case "${JOS_IMAGING_REBOOT_AFTER_DEPLOY:-1}" in 1|true|yes|on)
     sync
     reboot -f || reboot || true
-  fi
+  esac
 }
 
 capture_to_nfs() {
-  die "IMAGING: capture (task types 2/14) is not implemented yet — schedule deploy-only tests first."
+  : "${JOS_IMAGING_ALLOW_DISK_WRITE:?IMAGING: refusing capture — export JOS_IMAGING_ALLOW_DISK_WRITE=1}"
+  [[ -x /tools/jq ]] || die "IMAGING: /tools/jq missing (rebuild initrd)"
+
+  local pair disk disk_dev mnt imgdir path_rel
+  pair="$(jos_largest_fixed_disk_sysfs)"
+  disk="${pair%%:*}"
+  [[ -n "$disk" ]] || die "IMAGING: could not select source disk for capture"
+  disk_dev="/dev/${disk}"
+
+  local img_json core
+  img_json="$(jos_fog_get_image_json "$IMAGE_ID")"
+  core="$(jos_fog_json_core "$img_json")"
+  path_rel="$(jos_fog_jq "$core" '.path // empty')"
+  [[ -n "$path_rel" ]] || die "IMAGING: image ${IMAGE_ID} has empty path in FOG"
+
+  mnt="/mnt/fog-images"
+  jos_mount_fog_image_store "${FOG_SERVER}" "$mnt"
+
+  imgdir="${mnt}/${path_rel}"
+  mkdir -p "$imgdir"
+
+  log "IMAGING: capture disk=${disk_dev} → ${imgdir} task=${TASK_ID:-?}"
+
+  # Save partition table.
+  sfdisk -d "$disk_dev" > "${imgdir}/d1.partitions" 2>/dev/null || \
+    dd if="$disk_dev" bs=512 count=1 2>/dev/null | dd bs=446 count=1 > "${imgdir}/d1.mbr" 2>/dev/null || true
+
+  # Capture each partition.
+  local partdev partnum fs pctool imgfile
+  for partdev in /dev/${disk}[0-9]* /dev/${disk}p[0-9]*; do
+    [ -b "$partdev" ] || continue
+    partnum="${partdev##*[!0-9]}"
+    [ -n "$partnum" ] || continue
+
+    fs="$(blkid -s TYPE -o value "$partdev" 2>/dev/null || true)"
+    pctool="$(jos_pick_partclone_bin_for_fstype "$fs")"
+    if [[ -z "$pctool" || ! -x "$pctool" ]]; then
+      [[ -x /tools/partclone.extfs ]] && pctool="/tools/partclone.extfs"
+    fi
+    [[ -x "$pctool" ]] || { log "IMAGING: skipping ${partdev} (no partclone for fs='${fs:-unknown}')"; continue; }
+
+    imgfile="${imgdir}/d1p${partnum}.img"
+    log "IMAGING: capturing ${partdev} → ${imgfile} using ${pctool}"
+    "$pctool" -c -s "$partdev" -o "$imgfile"
+
+    echo "$partnum $fs" >> "${imgdir}/d1.original.fstypes"
+  done
+
+  log "IMAGING: capture finished."
+  jos_fog_task_done "${TASK_ID:-}"
+  sync
+  reboot -f || reboot || true
 }
 
 case "$ACTION" in
